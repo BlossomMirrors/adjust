@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import glob
+import os
 import re
 import subprocess
 import sys
@@ -8,15 +9,9 @@ from collections import defaultdict
 JUST_DIR = "/usr/share/blossomos"
 JUSTFILE = "/tmp/adjust"
 
-
-def assemble():
-    parts = sorted(glob.glob(f"{JUST_DIR}/*.just"))
-    with open(JUSTFILE, "w") as out:
-        for path in parts:
-            with open(path) as f:
-                out.write(f.read())
-            out.write("\n")
-
+group_re = re.compile(r'\[group\("(.+?)"\)\]')
+recipe_re = re.compile(r"^([a-zA-Z0-9_\-]+)(.*):\s*$")
+comment_re = re.compile(r"^#(?!!)(.*)$")
 
 # colors
 BLUE = "\033[1;34m"
@@ -27,49 +22,70 @@ DIM = "\033[2m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
-group_re = re.compile(r'\[group\("(.+?)"\)\]')
-recipe_re = re.compile(r"^([a-zA-Z0-9_\-]+)(.*):\s*$")
-comment_re = re.compile(r"^\s*#(.*)$")
+
+def setup_scripts(parts):
+    dst = "/tmp/scripts"
+    os.makedirs(dst, exist_ok=True)
+    for path in parts:
+        src = os.path.join(os.path.dirname(path), "scripts")
+        if not os.path.isdir(src):
+            continue
+        for name in os.listdir(src):
+            link = os.path.join(dst, name)
+            target = os.path.join(src, name)
+            if os.path.islink(link):
+                os.unlink(link)
+            if not os.path.exists(link):
+                os.symlink(target, link)
 
 
-def parse(path):
-    groups = defaultdict(list)
-    current_group = "misc"
-    last_comment = ""
+def assemble():
+    parts = sorted(glob.glob(f"{JUST_DIR}/**/*.just", recursive=True))
+    setup_scripts(parts)
+    with open(JUSTFILE, "w") as out:
+        for path in parts:
+            with open(path) as f:
+                out.write(f.read())
+            out.write("\n")
+    return parts
 
-    with open(path) as f:
-        for line in f:
-            line = line.rstrip()
 
-            g = group_re.search(line)
-            if g:
-                current_group = g.group(1)
-                continue
+def parse_all(parts):
+    all_groups = defaultdict(list)
+    for path in parts:
+        default_group = os.path.splitext(os.path.basename(path))[0]
+        current_group = default_group
+        last_comment = ""
 
-            c = comment_re.search(line)
-            if c:
-                last_comment = c.group(1).strip()
-                continue
+        with open(path) as f:
+            for line in f:
+                line = line.rstrip()
 
-            r = recipe_re.match(line)
-            if r:
-                name = r.group(1)
-                params = r.group(2).strip()
+                g = group_re.search(line)
+                if g:
+                    current_group = g.group(1)
+                    continue
 
-                is_private = name.startswith("_")
+                c = comment_re.search(line)
+                if c:
+                    last_comment = c.group(1).strip()
+                    continue
 
-                groups[current_group].append(
-                    {
-                        "name": name,
-                        "params": params,
-                        "desc": last_comment,
-                        "private": is_private,
-                    }
-                )
+                r = recipe_re.match(line)
+                if r:
+                    name = r.group(1)
+                    params = r.group(2).strip()
+                    all_groups[current_group].append(
+                        {
+                            "name": name,
+                            "params": params,
+                            "desc": last_comment,
+                            "private": name.startswith("_"),
+                        }
+                    )
+                    last_comment = ""
 
-                last_comment = ""
-
-    return groups
+    return all_groups
 
 
 def print_table(groups):
@@ -78,28 +94,30 @@ def print_table(groups):
     for group, items in groups.items():
         print(f"{CYAN}{BOLD}{group}{RESET}")
         print(f"{DIM}{'-' * len(group)}{RESET}")
-
         print(f"{BOLD}{'Command':28} {'Params':20} Description{RESET}")
 
         for i in items:
-            name = i["name"]
-            params = i["params"] or ""
-            desc = i["desc"] or ""
-
-            color = DIM if i["private"] else GREEN
-
-            print(f"{color}{name:28}{RESET} {YELLOW}{params:20}{RESET} {desc}")
+            if i["private"] or i["name"] == "default":
+                continue
+            print(
+                f"{GREEN}{i['name']:28}{RESET} "
+                f"{YELLOW}{i['params'] or '':20}{RESET} "
+                f"{i['desc'] or ''}"
+            )
 
         print()
 
 
-def run(args):
+def run(args, namespaces):
+    if args and args[0] in namespaces:
+        args = args[1:]
     subprocess.run(["just", "--justfile", JUSTFILE, *args])
 
 
 if __name__ == "__main__":
-    assemble()
+    parts = assemble()
+    namespaces = {os.path.splitext(os.path.basename(p))[0] for p in parts}
     if len(sys.argv) == 1:
-        print_table(parse(JUSTFILE))
+        print_table(parse_all(parts))
     else:
-        run(sys.argv[1:])
+        run(sys.argv[1:], namespaces)
