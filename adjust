@@ -89,7 +89,8 @@ def parse_all(parts):
 
 
 def print_table(groups):
-    print(f"{BLUE}{BOLD}adjust system commands{RESET}\n")
+    print(f"{BLUE}{BOLD}adjust system commands{RESET}")
+    print(f"{DIM}usage: adjust <namespace> <command> [args]{RESET}\n")
 
     for group, items in groups.items():
         print(f"{CYAN}{BOLD}{group}{RESET}")
@@ -108,16 +109,54 @@ def print_table(groups):
         print()
 
 
-def run(args, namespaces):
-    if args and args[0] in namespaces:
-        args = args[1:]
-    subprocess.run(["just", "--justfile", JUSTFILE, *args])
+def parse_recipes(parts):
+    recipes = defaultdict(set)
+    for path in parts:
+        namespace = os.path.splitext(os.path.basename(path))[0]
+        with open(path) as f:
+            for line in f:
+                r = recipe_re.match(line.rstrip())
+                if r:
+                    recipes[namespace].add(r.group(1))
+    return recipes
+
+
+def run(args, parts, recipes):
+    namespace = args[0]
+    if namespace not in recipes:
+        owners = sorted(n for n, names in recipes.items() if namespace in names)
+        if owners:
+            print(
+                f"unknown command: {namespace}\n"
+                f"did you mean: {BOLD}adjust {owners[0]} {namespace}{RESET}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"unknown namespace: {namespace}\n"
+                f"available: {', '.join(sorted(recipes))}",
+                file=sys.stderr,
+            )
+        sys.exit(1)
+
+    rest = args[1:]
+    if not rest:
+        ns_parts = [
+            p for p in parts
+            if os.path.splitext(os.path.basename(p))[0] == namespace
+        ]
+        print_table(parse_all(ns_parts))
+        return
+    if not rest[0].startswith("-") and rest[0] not in recipes[namespace]:
+        print(f"unknown command in {namespace}: {rest[0]}", file=sys.stderr)
+        sys.exit(1)
+    result = subprocess.run(["just", "--justfile", JUSTFILE, *rest])
+    sys.exit(result.returncode)
 
 
 if __name__ == "__main__":
     parts = assemble()
-    namespaces = {os.path.splitext(os.path.basename(p))[0] for p in parts}
     if len(sys.argv) == 1:
         print_table(parse_all(parts))
     else:
-        run(sys.argv[1:], namespaces)
+        run(sys.argv[1:], parts, parse_recipes(parts))
