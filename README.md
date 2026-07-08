@@ -1,16 +1,17 @@
 # adjust
 
-**BlossomOS system command runner** – A pretty frontend for [`just`](https://github.com/casey/just) that reads `/etc/Justfile` and displays grouped system commands.
+**BlossomOS system command runner** – A pretty frontend for [`just`](https://github.com/casey/just) that assembles `*.just` files from `/usr/share/blossomos` and displays grouped system commands.
 
 ## Overview
 
-`adjust` is a command-line utility designed for BlossomOS that provides a user-friendly interface for managing and executing system commands defined in a Justfile. It parses `/etc/Justfile`, organizes commands into logical groups, and presents them in a clean, colorized table format.
+`adjust` is a command-line utility designed for BlossomOS that provides a user-friendly interface for managing and executing system commands defined in just recipes. It collects all `*.just` files under `/usr/share/blossomos`, organizes commands into namespaces (one per file), and presents them in a clean, colorized table format. Commands are invoked with their namespace, e.g. `adjust pkglayer list`.
 
 ## Features
 
-- 📋 **Grouped Command Display** – Organizes commands by categories defined in the Justfile
+- 📋 **Namespaced Commands** – Each `*.just` file becomes its own namespace
 - 🎨 **Colorized Output** – Easy-to-read table with syntax highlighting
-- 🚀 **Command Execution** – Pass commands directly to `just` for execution
+- 🚀 **Command Execution** – Validated and passed to `just` for execution
+- 💡 **Helpful Errors** – Suggests the right namespace when a command is typed without one
 - 📦 **RPM Packaging** – Ready for distribution via RPM packages
 
 ## Requirements
@@ -23,7 +24,7 @@
 ### From RPM Package
 
 ```bash
-rpm-ostree install ./adjust-1.0.0-1.*.noarch.rpm
+rpm-ostree install ./adjust-0.2.0-1.*.noarch.rpm
 ```
 
 ### From Source
@@ -48,7 +49,7 @@ sudo cp adjust /usr/local/bin/
 
 The RPM package will be available at:
 ```
-rpmbuild/RPMS/noarch/adjust-1.0.0-1.*.noarch.rpm
+rpmbuild/RPMS/noarch/adjust-0.2.0-1.*.noarch.rpm
 ```
 
 ## Usage
@@ -64,36 +65,49 @@ adjust
 Example output:
 ```
 adjust system commands
+usage: adjust <namespace> <command> [args]
 
-system
+pkglayer
 --------
-Command                        Params               Description
-update                                              Update system packages
-clean                                               Clean package cache
-restart-network                                     Restart network services
+Command                      Params               Description
+remove                       pkgman               remove a pkglayer container, no prompt (for scripts)
+list                                              list active pkglayer containers
+```
 
-misc
-----
-Command                        Params               Description
-help                                                Show help message
+Run `adjust <namespace>` to list only that namespace's commands:
+
+```bash
+adjust pkglayer
 ```
 
 ### Execute Commands
 
-Pass any arguments to `adjust` and they will be forwarded to `just`:
+Commands are always invoked with their namespace. The remaining arguments are forwarded to `just`:
 
 ```bash
-adjust update
-adjust restart-network
+adjust pkglayer list
+adjust pkglayer remove yay
+```
+
+Typing a command without its namespace prints a hint instead of running it:
+
+```
+$ adjust list
+unknown command: list
+did you mean: adjust pkglayer list
 ```
 
 ## Justfile Format
 
-`adjust` parses `/etc/Justfile` and recognizes the following patterns:
+`adjust` assembles every `*.just` file under `/usr/share/blossomos` into a single Justfile and recognizes the following patterns:
+
+### Namespaces
+
+The file name defines the namespace: `/usr/share/blossomos/pkglayer/pkglayer.just` provides the `pkglayer` namespace. A `scripts/` directory next to a `.just` file is symlinked into `/tmp/scripts` so recipes can call helper scripts.
 
 ### Group Definitions
 
-Commands are organized into groups using the `[group("name")]` attribute:
+In the overview table, commands are grouped by their namespace by default. The `[group("name")]` attribute overrides the display group:
 
 ```just
 [group("system")]
@@ -142,10 +156,11 @@ adjust/
 
 ## Configuration
 
-The default Justfile path is `/etc/Justfile`. To use a different Justfile, modify the `JUSTFILE` constant in the `adjust` script:
+Recipes are read from `/usr/share/blossomos` and assembled into `/tmp/adjust`. To change either path, modify the constants in the `adjust` script:
 
 ```python
-JUSTFILE = "/path/to/your/Justfile"
+JUST_DIR = "/usr/share/blossomos"
+JUSTFILE = "/tmp/adjust"
 ```
 
 ## License
