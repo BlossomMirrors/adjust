@@ -150,6 +150,9 @@ def run(args, parts, recipes):
 
     rest = args[1:]
     if not rest:
+        if "default" in recipes[namespace]:
+            result = subprocess.run(["just", "--justfile", JUSTFILE, "default"])
+            sys.exit(result.returncode)
         ns_parts = [
             p for p in parts
             if os.path.splitext(os.path.basename(p))[0] == namespace
